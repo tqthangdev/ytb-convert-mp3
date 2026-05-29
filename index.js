@@ -47,12 +47,12 @@ app.get('/download', async (req, res) => {
       console.warn('WARNING: cookies.txt missing from directory. Proceeding without authentication.');
     }
 
-    // 1. Fetch video details with injected cookies authentication flags
-    // 🛠️ ULTIMATE FIX: Bypass the data center bot challenge by providing a real user session token
+    // 1. Fetch video details with matching browser-based web clients
+    // 🛠️ UPDATED 2026: Shifted from 'android' to 'web' client so yt-dlp can successfully bind your cookies asset
     const info = await ytdlpWrap.getVideoInfo([
       videoUrl,
       ...cookieArgs,
-      '--extractor-args', 'youtube:player_client=android;player_skip=webpage'
+      '--extractor-args', 'youtube:player_client=web;player_skip=webpage'
     ]);
     
     // 2. Select best audio-only format stream
@@ -76,12 +76,12 @@ app.get('/download', async (req, res) => {
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Disposition');
 
-    // 3. Stream the raw media data back using the exact same credential arguments
+    // 3. Stream the raw media data back using matching web configuration parameters
     let ytdlpReadable = ytdlpWrap.execStream([
       videoUrl,
       '-f', audioFormat.format_id,
       ...cookieArgs,
-      '--extractor-args', 'youtube:player_client=android;player_skip=webpage'
+      '--extractor-args', 'youtube:player_client=web;player_skip=webpage'
     ]);
     
     ytdlpReadable.pipe(res);
@@ -94,7 +94,7 @@ app.get('/download', async (req, res) => {
   } catch (error) {
     console.error('Render System Internal Error:', error);
     if (!res.headersSent) {
-      res.status(500).send('Internal Server Error. Please verify authentication payload.');
+      res.status(500).send('Internal Server Error. Please verify cookie validation status.');
     }
   }
 });
