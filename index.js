@@ -37,12 +37,12 @@ app.get('/download', async (req, res) => {
 
     console.log(`Cloud Server routing download request for: ${videoUrl}`);
 
-    // 1. Fetch video details with strict official mobile client impersonation
-    // 🛠️ UPDATED: Structured extractor arguments to pass rigorous bot challenges using native mobile clients
+    // 1. Fetch video details using specialized non-bot web embedded/mweb clients
+    // 🛠️ FIX 2026: Bypass the "Sign in to confirm you're not a bot" error on data centers
     const info = await ytdlpWrap.getVideoInfo([
       videoUrl,
       '--extractor-args', 
-      'youtube:player_client=android,ios;player_skip=webpage;innertube_host=www.youtube.com'
+      'youtube:player_client=mweb,embedded;player_skip=webpage'
     ]);
     
     // 2. Select best audio-only format stream
@@ -66,12 +66,12 @@ app.get('/download', async (req, res) => {
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Disposition');
 
-    // 3. Spawn the streaming download processing pipeline using the exact same bypass args
+    // 3. Stream the raw media data back to the client app using matching extractor configurations
     let ytdlpReadable = ytdlpWrap.execStream([
       videoUrl,
       '-f', audioFormat.format_id,
       '--extractor-args', 
-      'youtube:player_client=android,ios;player_skip=webpage;innertube_host=www.youtube.com'
+      'youtube:player_client=mweb,embedded;player_skip=webpage'
     ]);
     
     ytdlpReadable.pipe(res);
@@ -83,9 +83,12 @@ app.get('/download', async (req, res) => {
 
   } catch (error) {
     console.error('Render System Internal Error:', error);
-    if (!res.headersSent) res.status(500).send('Internal Server Error.');
+    if (!res.headersSent) {
+      res.status(500).send('Internal Server Error. Please retry in a few moments.');
+    }
   }
 });
+
 initYtdlp().then(() => {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server successfully bound and listening on port ${PORT}`);
