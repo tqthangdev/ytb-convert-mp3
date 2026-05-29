@@ -37,12 +37,22 @@ app.get('/download', async (req, res) => {
 
     console.log(`Cloud Server routing download request for: ${videoUrl}`);
 
-    // 1. Fetch video details using specialized non-bot web embedded/mweb clients
-    // 🛠️ FIX 2026: Bypass the "Sign in to confirm you're not a bot" error on data centers
+    // Define the local path of the authentication cookies file inside the container
+    const cookiesPath = path.join(__dirname, 'cookies.txt');
+    const cookieArgs = fs.existsSync(cookiesPath) ? ['--cookies', cookiesPath] : [];
+
+    if (cookieArgs.length > 0) {
+      console.log('Injecting YouTube authentication cookies asset successfully.');
+    } else {
+      console.warn('WARNING: cookies.txt missing from directory. Proceeding without authentication.');
+    }
+
+    // 1. Fetch video details with injected cookies authentication flags
+    // 🛠️ ULTIMATE FIX: Bypass the data center bot challenge by providing a real user session token
     const info = await ytdlpWrap.getVideoInfo([
       videoUrl,
-      '--extractor-args', 
-      'youtube:player_client=mweb,embedded;player_skip=webpage'
+      ...cookieArgs,
+      '--extractor-args', 'youtube:player_client=android;player_skip=webpage'
     ]);
     
     // 2. Select best audio-only format stream
@@ -66,12 +76,12 @@ app.get('/download', async (req, res) => {
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Disposition');
 
-    // 3. Stream the raw media data back to the client app using matching extractor configurations
+    // 3. Stream the raw media data back using the exact same credential arguments
     let ytdlpReadable = ytdlpWrap.execStream([
       videoUrl,
       '-f', audioFormat.format_id,
-      '--extractor-args', 
-      'youtube:player_client=mweb,embedded;player_skip=webpage'
+      ...cookieArgs,
+      '--extractor-args', 'youtube:player_client=android;player_skip=webpage'
     ]);
     
     ytdlpReadable.pipe(res);
@@ -84,7 +94,7 @@ app.get('/download', async (req, res) => {
   } catch (error) {
     console.error('Render System Internal Error:', error);
     if (!res.headersSent) {
-      res.status(500).send('Internal Server Error. Please retry in a few moments.');
+      res.status(500).send('Internal Server Error. Please verify authentication payload.');
     }
   }
 });
