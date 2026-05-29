@@ -1,8 +1,10 @@
 # 1. Use the official Node.js lightweight Alpine Linux image
 FROM node:20-alpine
 
-# 2. Install system dependencies required by yt-dlp (Python3 and ffmpeg for audio processing)
-RUN apk add --no-cache python3 ffmpeg
+# 2. Install system dependencies required by yt-dlp (Python3, pip, and ffmpeg)
+# 🛠️ FIXED: Added 'py3-pip' and explicitly run 'pip3 install' to place 'yt-dlp' globally in Linux PATH
+RUN apk add --no-cache python3 py3-pip ffmpeg && \
+    pip3 install --no-cache-dir --break-system-packages yt-dlp
 
 # 3. Create and set the application working directory inside the container
 WORKDIR /usr/src/app
