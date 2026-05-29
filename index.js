@@ -37,11 +37,12 @@ app.get('/download', async (req, res) => {
 
     console.log(`Cloud Server routing download request for: ${videoUrl}`);
 
-    // 1. Fetch video details with extra flags to bypass bot challenges
-    // 🛠️ UPDATED: Added '--extractor-args' to simulate an official mobile client platform extractor
+    // 1. Fetch video details with strict official mobile client impersonation
+    // 🛠️ UPDATED: Structured extractor arguments to pass rigorous bot challenges using native mobile clients
     const info = await ytdlpWrap.getVideoInfo([
       videoUrl,
-      '--extractor-args', 'youtube:player_client=android,ios;player_skip=webpage'
+      '--extractor-args', 
+      'youtube:player_client=android,ios;player_skip=webpage;innertube_host=www.youtube.com'
     ]);
     
     // 2. Select best audio-only format stream
@@ -65,11 +66,12 @@ app.get('/download', async (req, res) => {
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Disposition');
 
-    // 3. Spawn the streaming download processing pipeline with matching bypass args
+    // 3. Spawn the streaming download processing pipeline using the exact same bypass args
     let ytdlpReadable = ytdlpWrap.execStream([
       videoUrl,
       '-f', audioFormat.format_id,
-      '--extractor-args', 'youtube:player_client=android,ios;player_skip=webpage'
+      '--extractor-args', 
+      'youtube:player_client=android,ios;player_skip=webpage;innertube_host=www.youtube.com'
     ]);
     
     ytdlpReadable.pipe(res);
@@ -84,7 +86,6 @@ app.get('/download', async (req, res) => {
     if (!res.headersSent) res.status(500).send('Internal Server Error.');
   }
 });
-
 initYtdlp().then(() => {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server successfully bound and listening on port ${PORT}`);

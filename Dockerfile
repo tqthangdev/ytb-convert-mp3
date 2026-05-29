@@ -1,10 +1,9 @@
 # 1. Use the official Node.js lightweight Alpine Linux image
 FROM node:20-alpine
 
-# 2. Install system dependencies required by yt-dlp
-# 🛠️ UPDATED: Added 'nodejs' package globally so yt-dlp can locate a JS runtime environment to decode YouTube player scripts
+# 2. Install system dependencies and enforce the absolute latest upgraded version of yt-dlp via pip3
 RUN apk add --no-cache python3 py3-pip ffmpeg nodejs && \
-    pip3 install --no-cache-dir --break-system-packages yt-dlp
+    pip3 install --no-cache-dir --upgrade --break-system-packages yt-dlp
 
 # 3. Create and set the application working directory inside the container
 WORKDIR /usr/src/app
