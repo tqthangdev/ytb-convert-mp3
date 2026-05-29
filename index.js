@@ -48,13 +48,11 @@ app.get('/download', async (req, res) => {
     // Download vào file tạm
     await ytdlpWrap.execPromise([
       videoUrl,
-      '-f', 'ba/b',
       '-x',
       '--audio-format', 'mp3',
       '--audio-quality', '0',
       '-o', tmpFile,
       ...cookieArgs,
-      '--extractor-args', 'youtube:player_client=web;player_skip=webpage'
     ]);
 
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(safeTitle)}.mp3`);
