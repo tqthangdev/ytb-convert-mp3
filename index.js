@@ -40,44 +40,29 @@ app.get('/download', async (req, res) => {
     const cookiesPath = path.join(__dirname, 'cookies.txt');
     const cookieArgs = fs.existsSync(cookiesPath) ? ['--cookies', cookiesPath] : [];
 
-    // 1. Fetch video details with stable browser-based web clients configuration
+    // 1. Fetch video details to grab the title safely
     const info = await ytdlpWrap.getVideoInfo([
       videoUrl,
       ...cookieArgs,
       '--extractor-args', 'youtube:player_client=web;player_skip=webpage'
     ]);
     
-    // 2. Select best audio-only format stream
-    // 🛠️ FIXED: Added a robust fallback to 'bestaudio' parameters if the explicit vcodec filter array returns empty
-    let audioFormat = info.formats
-      .filter(f => f.vcodec === 'none' && f.acodec !== 'none')
-      .sort((a, b) => (b.abr || 0) - (a.abr || 0))[0];
-
-    let formatId = 'bestaudio/best';
-    let sizeBytes = null;
-
-    if (audioFormat) {
-      formatId = audioFormat.format_id;
-      sizeBytes = audioFormat.filesize || audioFormat.filesize_approx;
-    } else {
-      console.log('Explicit audio format not found. Falling back to global bestaudio selection.');
-    }
-
     const videoTitle = info.title || 'downloaded_audio';
     const safeTitle = videoTitle.replace(/[\\/:*?"<>|]/g, '');
 
-    if (sizeBytes) {
-      res.setHeader('Content-Length', sizeBytes.toString());
-    }
-
+    // 2. Set headers for streaming direct attachment
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(safeTitle)}.mp3`);
     res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Disposition');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
 
-    // 3. Stream the audio payload back to the React Native Client using the optimized formatId selection
+    // 3. 🛠️ ULTIMATE STREAM FIX: Let yt-dlp automatically handle format extraction natively
+    // We pass '-x' to extract audio and '--audio-format mp3' to pipe raw standard mpeg stream directly
     let ytdlpReadable = ytdlpWrap.execStream([
       videoUrl,
-      '-f', formatId,
+      '-f', 'ba/b', // Select best audio or best overall fallback globally
+      '-x',
+      '--audio-format', 'mp3',
+      '--audio-quality', '0', // Highest quality VBR mapping
       ...cookieArgs,
       '--extractor-args', 'youtube:player_client=web;player_skip=webpage'
     ]);
@@ -92,7 +77,7 @@ app.get('/download', async (req, res) => {
   } catch (error) {
     console.error('Render System Internal Error:', error);
     if (!res.headersSent) {
-      res.status(500).send('Internal Server Error. Format extract pipeline failed.');
+      res.status(500).send('Internal Server Error. Core processing pipeline crashed.');
     }
   }
 });
