@@ -1,14 +1,14 @@
 # 1. Use the official Node.js lightweight Alpine Linux image
 FROM node:20-alpine
 
-# 2. Install system dependencies, ffmpeg, yt-dlp, and deno (required for yt-dlp n-challenge solving)
+# 2. Install system dependencies, ffmpeg, yt-dlp
 RUN apk add --no-cache python3 py3-pip ffmpeg curl unzip && \
-    pip3 install --no-cache-dir --upgrade --break-system-packages yt-dlp && \
-    curl -fsSL https://deno.land/install.sh | sh
+    pip3 install --no-cache-dir --upgrade --break-system-packages yt-dlp
 
-# 3. Add deno to PATH so yt-dlp can find it at runtime
-ENV DENO_INSTALL="/root/.deno"
-ENV PATH="${DENO_INSTALL}/bin:${PATH}"
+# 3. Install deno manually (Alpine-compatible binary)
+RUN curl -fsSL https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.tar.gz \
+    | tar -xz -C /usr/local/bin && \
+    chmod +x /usr/local/bin/deno
 
 # 4. Create and set the application working directory inside the container
 WORKDIR /usr/src/app
