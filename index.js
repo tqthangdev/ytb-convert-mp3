@@ -31,54 +31,49 @@ async function initYtdlp() {
 app.get('/download', async (req, res) => {
   try {
     const videoUrl = req.query.url;
-    if (!videoUrl) {
-      return res.status(400).send('Error: Missing URL parameter.');
-    }
-
-    console.log(`Cloud Server routing download request for: ${videoUrl}`);
+    if (!videoUrl) return res.status(400).send('Missing URL');
 
     const cookiesPath = path.join(__dirname, 'cookies.txt');
     const cookieArgs = fs.existsSync(cookiesPath) ? ['--cookies', cookiesPath] : [];
 
-    // 1. Fetch video details to grab the title safely
     const info = await ytdlpWrap.getVideoInfo([
       videoUrl,
       ...cookieArgs,
       '--extractor-args', 'youtube:player_client=web;player_skip=webpage'
     ]);
-    
-    const videoTitle = info.title || 'downloaded_audio';
-    const safeTitle = videoTitle.replace(/[\\/:*?"<>|]/g, '');
 
-    // 2. Set headers for streaming direct attachment
+    const safeTitle = (info.title || 'audio').replace(/[\\/:*?"<>|]/g, '');
+    const tmpFile = path.join('/tmp', `${Date.now()}_${safeTitle}.mp3`);
+
+    // Download vào file tạm
+    await ytdlpWrap.execPromise([
+      videoUrl,
+      '-f', 'ba/b',
+      '-x',
+      '--audio-format', 'mp3',
+      '--audio-quality', '0',
+      '-o', tmpFile,
+      ...cookieArgs,
+      '--extractor-args', 'youtube:player_client=web;player_skip=webpage'
+    ]);
+
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(safeTitle)}.mp3`);
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
 
-    // 3. 🛠️ ULTIMATE STREAM FIX: Let yt-dlp automatically handle format extraction natively
-    // We pass '-x' to extract audio and '--audio-format mp3' to pipe raw standard mpeg stream directly
-    let ytdlpReadable = ytdlpWrap.execStream([
-      videoUrl,
-      '-f', 'ba/b', // Select best audio or best overall fallback globally
-      '-x',
-      '--audio-format', 'mp3',
-      '--audio-quality', '0', // Highest quality VBR mapping
-      ...cookieArgs,
-      '--extractor-args', 'youtube:player_client=web;player_skip=webpage'
-    ]);
-    
-    ytdlpReadable.pipe(res);
-
-    ytdlpReadable.on('error', (err) => {
-      console.error('Data stream pipe error:', err);
-      if (!res.headersSent) res.status(500).send('Streaming error.');
+    // Stream file tạm ra client rồi xóa
+    const fileStream = fs.createReadStream(tmpFile);
+    fileStream.pipe(res);
+    fileStream.on('end', () => fs.unlink(tmpFile, () => {}));
+    fileStream.on('error', (err) => {
+      console.error('File stream error:', err);
+      fs.unlink(tmpFile, () => {});
+      if (!res.headersSent) res.status(500).send('Stream error');
     });
 
   } catch (error) {
-    console.error('Render System Internal Error:', error);
-    if (!res.headersSent) {
-      res.status(500).send('Internal Server Error. Core processing pipeline crashed.');
-    }
+    console.error('Error:', error);
+    if (!res.headersSent) res.status(500).send('Internal Server Error');
   }
 });
 
