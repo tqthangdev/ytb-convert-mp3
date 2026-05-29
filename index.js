@@ -51,10 +51,15 @@ app.get('/download', async (req, res) => {
     const cookiesPath = path.join(__dirname, 'cookies.txt');
     const cookieArgs = fs.existsSync(cookiesPath) ? ['--cookies', cookiesPath] : [];
 
+    const ytdlpArgs = [
+      '--js-runtimes', 'deno',
+      '--remote-components', 'ejs:github',
+    ];
+
     // Step 1: Fetch video metadata to get the title
     const info = await ytdlpWrap.getVideoInfo([
       videoUrl,
-      '--js-runtimes', 'deno',
+      ...ytdlpArgs,
       ...cookieArgs,
     ]);
 
@@ -76,7 +81,7 @@ app.get('/download', async (req, res) => {
       videoUrl,
       '-f', '140',
       '-o', tmpM4a,
-      '--js-runtimes', 'deno',  
+      ...ytdlpArgs,
       ...cookieArgs,
     ]);
 
