@@ -4,18 +4,27 @@ const YTDLPWrap = require('yt-dlp-wrap').default;
 const path = require('path');
 const fs = require('fs');
 const { execSync } = require('child_process');
+const http = require('http'); 
+const { Server } = require('socket.io'); 
 
 const app = express();
 const PORT = process.env.PORT || 9999;
 
-// Use .exe on Windows, rely on global binary on Linux (Render)
+// Initialize HTTP server wrapped with Socket.io for real-time progress updates
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
+
 const isWindows = process.platform === 'win32';
 const binaryPath = isWindows ? path.join(__dirname, 'yt-dlp.exe') : 'yt-dlp';
 const ytdlpWrap = new YTDLPWrap(binaryPath);
 
 app.use(cors());
 
-// Download yt-dlp binary on Windows if not present; Linux uses system-installed binary
 async function initYtdlp() {
   if (isWindows) {
     if (!fs.existsSync(binaryPath)) {
@@ -24,7 +33,6 @@ async function initYtdlp() {
     }
   } else {
     console.log('Linux detected. Using system yt-dlp.');
-    // Check deno is available
     try {
       const { execSync } = require('child_process');
       const denoVersion = execSync('deno --version').toString();
@@ -35,17 +43,33 @@ async function initYtdlp() {
   }
 }
 
+// Listen for incoming socket connections from clients
+io.on('connection', (socket) => {
+  console.log(`Client connected via socket: ${socket.id}`);
+  socket.on('disconnect', () => {
+    console.log(`Client disconnected socket: ${socket.id}`);
+  });
+});
+
 app.get('/download', async (req, res) => {
   let tmpM4a = null;
   let tmpMp3 = null;
+  const socketId = req.query.socketId; // Extract socketId passed from frontend
+
+  // Helper function to emit real-time status updates via Socket.io
+  const sendStatus = (status, percent) => {
+    if (socketId && io.to(socketId)) {
+      io.to(socketId).emit('progress_update', { status, percent });
+    }
+  };
 
   try {
     const videoUrl = req.query.url;
     if (!videoUrl) return res.status(400).send('Missing URL parameter.');
 
-    console.log(`Download request for: ${videoUrl}`);
+    console.log(`Download request received for URL: ${videoUrl}`);
+    sendStatus('fetching_info', 5); // Notify client that metadata extraction has started
 
-    // Keep connection alive to prevent 502 timeout during processing
     req.setTimeout(0);
     res.setTimeout(0);
 
@@ -69,22 +93,38 @@ app.get('/download', async (req, res) => {
     tmpM4a = path.join('/tmp', `${timestamp}_${safeTitle}.m4a`);
     tmpMp3 = path.join('/tmp', `${timestamp}_${safeTitle}.mp3`);
 
-    console.log(`Downloading: ${safeTitle}`);
+    console.log(`Downloading audio source: ${safeTitle}`);
+    sendStatus('downloading_server', 20); // Notify client that server download has started
 
-    await ytdlpWrap.execPromise([
+    // Monitor yt-dlp download progress stream and map it to 20% -> 70% range
+    let ytdlpEventEmitter = ytdlpWrap.exec([
       videoUrl,
       '-f', '140',
       '-o', tmpM4a,
       ...ytdlpArgs,
       ...cookieArgs,
-    ]);
+    ])
+    .on('progress', (progress) => {
+       const currentPercent = 20 + Math.round((progress.percent || 0) * 0.5); 
+       sendStatus('downloading_server', currentPercent);
+    })
+    .on('error', (err) => { throw err; });
 
-    console.log('Download done. Converting to mp3...');
+    // Wait until the download stream completely closes
+    await new Promise((resolve, reject) => {
+       ytdlpEventEmitter.on('close', resolve);
+       ytdlpEventEmitter.on('error', reject);
+    });
+
+    console.log('Download complete. Initiating FFmpeg conversion to MP3...');
+    sendStatus('converting', 75); // Notify client that audio transcoding is in progress
+
     execSync(`ffmpeg -i "${tmpM4a}" -q:a 0 "${tmpMp3}"`);
     fs.unlinkSync(tmpM4a);
     tmpM4a = null;
 
-    console.log('Conversion done. Streaming...');
+    console.log('Transcoding complete. Ready to stream file back to client.');
+    sendStatus('streaming', 90); // Notify client that file is ready to be delivered
 
     const stat = fs.statSync(tmpMp3);
 
@@ -97,18 +137,20 @@ app.get('/download', async (req, res) => {
     fileStream.pipe(res);
 
     fileStream.on('end', () => {
-      console.log('Stream complete. Cleaning up...');
+      console.log('Streaming successfully completed. Cleaning up cache files...');
+      sendStatus('completed', 100);
       fs.unlink(tmpMp3, () => {});
     });
 
     fileStream.on('error', (err) => {
-      console.error('File stream error:', err);
+      console.error('File stream error encountered:', err);
       fs.unlink(tmpMp3, () => {});
       if (!res.headersSent) res.status(500).send('Stream error.');
     });
 
   } catch (error) {
-    console.error('Internal error:', error);
+    console.error('Internal server exception occurred:', error);
+    sendStatus('error', 0);
     if (tmpM4a) fs.unlink(tmpM4a, () => {});
     if (tmpMp3) fs.unlink(tmpMp3, () => {});
     if (!res.headersSent) res.status(500).send('Internal Server Error.');
@@ -116,7 +158,8 @@ app.get('/download', async (req, res) => {
 });
 
 initYtdlp().then(() => {
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server listening on port ${PORT}`);
+  // Use http server wrapper instance instead of original express app listener
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server successfully deployed and listening on port ${PORT}`);
   });
 });
