@@ -37,18 +37,10 @@ app.get('/download', async (req, res) => {
 
     console.log(`Cloud Server routing download request for: ${videoUrl}`);
 
-    // Define the local path of the authentication cookies file inside the container
     const cookiesPath = path.join(__dirname, 'cookies.txt');
     const cookieArgs = fs.existsSync(cookiesPath) ? ['--cookies', cookiesPath] : [];
 
-    if (cookieArgs.length > 0) {
-      console.log('Injecting YouTube authentication cookies asset successfully.');
-    } else {
-      console.warn('WARNING: cookies.txt missing from directory. Proceeding without authentication.');
-    }
-
-    // 1. Fetch video details with matching browser-based web clients
-    // 🛠️ UPDATED 2026: Shifted from 'android' to 'web' client so yt-dlp can successfully bind your cookies asset
+    // 1. Fetch video details with stable browser-based web clients configuration
     const info = await ytdlpWrap.getVideoInfo([
       videoUrl,
       ...cookieArgs,
@@ -56,17 +48,23 @@ app.get('/download', async (req, res) => {
     ]);
     
     // 2. Select best audio-only format stream
-    const audioFormat = info.formats
+    // 🛠️ FIXED: Added a robust fallback to 'bestaudio' parameters if the explicit vcodec filter array returns empty
+    let audioFormat = info.formats
       .filter(f => f.vcodec === 'none' && f.acodec !== 'none')
       .sort((a, b) => (b.abr || 0) - (a.abr || 0))[0];
 
-    if (!audioFormat) {
-      return res.status(404).send('Error: Playable audio format not found.');
+    let formatId = 'bestaudio/best';
+    let sizeBytes = null;
+
+    if (audioFormat) {
+      formatId = audioFormat.format_id;
+      sizeBytes = audioFormat.filesize || audioFormat.filesize_approx;
+    } else {
+      console.log('Explicit audio format not found. Falling back to global bestaudio selection.');
     }
 
     const videoTitle = info.title || 'downloaded_audio';
     const safeTitle = videoTitle.replace(/[\\/:*?"<>|]/g, '');
-    const sizeBytes = audioFormat.filesize || audioFormat.filesize_approx;
 
     if (sizeBytes) {
       res.setHeader('Content-Length', sizeBytes.toString());
@@ -76,10 +74,10 @@ app.get('/download', async (req, res) => {
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Disposition');
 
-    // 3. Stream the raw media data back using matching web configuration parameters
+    // 3. Stream the audio payload back to the React Native Client using the optimized formatId selection
     let ytdlpReadable = ytdlpWrap.execStream([
       videoUrl,
-      '-f', audioFormat.format_id,
+      '-f', formatId,
       ...cookieArgs,
       '--extractor-args', 'youtube:player_client=web;player_skip=webpage'
     ]);
@@ -94,7 +92,7 @@ app.get('/download', async (req, res) => {
   } catch (error) {
     console.error('Render System Internal Error:', error);
     if (!res.headersSent) {
-      res.status(500).send('Internal Server Error. Please verify cookie validation status.');
+      res.status(500).send('Internal Server Error. Format extract pipeline failed.');
     }
   }
 });
