@@ -37,8 +37,12 @@ app.get('/download', async (req, res) => {
 
     console.log(`Cloud Server routing download request for: ${videoUrl}`);
 
-    // 1. Fetch video details from YouTube
-    const info = await ytdlpWrap.getVideoInfo(videoUrl);
+    // 1. Fetch video details with extra flags to bypass bot challenges
+    // 🛠️ UPDATED: Added '--extractor-args' to simulate an official mobile client platform extractor
+    const info = await ytdlpWrap.getVideoInfo([
+      videoUrl,
+      '--extractor-args', 'youtube:player_client=android,ios;player_skip=webpage'
+    ]);
     
     // 2. Select best audio-only format stream
     const audioFormat = info.formats
@@ -61,8 +65,13 @@ app.get('/download', async (req, res) => {
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Disposition');
 
-    // 3. Spawn the streaming download processing pipeline
-    let ytdlpReadable = ytdlpWrap.execStream([videoUrl, '-f', audioFormat.format_id]);
+    // 3. Spawn the streaming download processing pipeline with matching bypass args
+    let ytdlpReadable = ytdlpWrap.execStream([
+      videoUrl,
+      '-f', audioFormat.format_id,
+      '--extractor-args', 'youtube:player_client=android,ios;player_skip=webpage'
+    ]);
+    
     ytdlpReadable.pipe(res);
 
     ytdlpReadable.on('error', (err) => {
