@@ -5,10 +5,12 @@ FROM node:20-alpine
 RUN apk add --no-cache python3 py3-pip ffmpeg curl unzip && \
     pip3 install --no-cache-dir --upgrade --break-system-packages yt-dlp
 
-# 3. Install deno manually (Alpine-compatible binary)
-RUN curl -fsSL https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.tar.gz \
-    | tar -xz -C /usr/local/bin && \
-    chmod +x /usr/local/bin/deno
+# 3. Install deno (Alpine/musl compatible binary)
+RUN curl -fsSL https://github.com/denoland/deno/releases/download/v2.3.3/deno-x86_64-unknown-linux-musl.zip \
+    -o /tmp/deno.zip && \
+    unzip /tmp/deno.zip -d /usr/local/bin && \
+    chmod +x /usr/local/bin/deno && \
+    rm /tmp/deno.zip
 
 # 4. Create and set the application working directory inside the container
 WORKDIR /usr/src/app
