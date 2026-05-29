@@ -41,13 +41,14 @@ app.get('/download', async (req, res) => {
 
   try {
     const videoUrl = req.query.url;
-    if (!videoUrl) {
-      return res.status(400).send('Error: Missing URL parameter.');
-    }
+    if (!videoUrl) return res.status(400).send('Missing URL parameter.');
 
     console.log(`Download request for: ${videoUrl}`);
 
-    // Attach cookies if available (helps bypass age-restricted or region-locked videos)
+    // Keep connection alive to prevent 502 timeout during processing
+    req.setTimeout(0);
+    res.setTimeout(0);
+
     const cookiesPath = path.join(__dirname, 'cookies.txt');
     const cookieArgs = fs.existsSync(cookiesPath) ? ['--cookies', cookiesPath] : [];
 
@@ -56,27 +57,20 @@ app.get('/download', async (req, res) => {
       '--remote-components', 'ejs:github',
     ];
 
-    // Step 1: Fetch video metadata to get the title
     const info = await ytdlpWrap.getVideoInfo([
       videoUrl,
       ...ytdlpArgs,
       ...cookieArgs,
     ]);
 
-    const videoTitle = info.title || 'downloaded_audio';
-
-    // Sanitize title to be safe for use as a filename
-    const safeTitle = videoTitle.replace(/[\\/:*?"<>|]/g, '');
+    const safeTitle = (info.title || 'audio').replace(/[\\/:*?"<>|]/g, '');
     const timestamp = Date.now();
 
-    // Define temp file paths for intermediate m4a and final mp3
     tmpM4a = path.join('/tmp', `${timestamp}_${safeTitle}.m4a`);
     tmpMp3 = path.join('/tmp', `${timestamp}_${safeTitle}.mp3`);
 
     console.log(`Downloading: ${safeTitle}`);
 
-    // Step 2: Download format 140 (m4a, 129k) — always available on YouTube
-    // Avoids JS runtime dependency that causes "format not available" errors
     await ytdlpWrap.execPromise([
       videoUrl,
       '-f', '140',
@@ -85,30 +79,28 @@ app.get('/download', async (req, res) => {
       ...cookieArgs,
     ]);
 
-    console.log('Download complete. Converting to mp3...');
-
-    // Step 3: Convert m4a to mp3 using ffmpeg, then remove the m4a temp file
+    console.log('Download done. Converting to mp3...');
     execSync(`ffmpeg -i "${tmpM4a}" -q:a 0 "${tmpMp3}"`);
     fs.unlinkSync(tmpM4a);
     tmpM4a = null;
 
-    console.log('Conversion complete. Streaming mp3...');
+    console.log('Conversion done. Streaming...');
 
-    // Step 4: Set response headers and stream the mp3 file to the client
+    const stat = fs.statSync(tmpMp3);
+
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(safeTitle)}.mp3`);
     res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
+    res.setHeader('Content-Length', stat.size);
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length');
 
     const fileStream = fs.createReadStream(tmpMp3);
     fileStream.pipe(res);
 
-    // Cleanup mp3 temp file after streaming finishes
     fileStream.on('end', () => {
       console.log('Stream complete. Cleaning up...');
       fs.unlink(tmpMp3, () => {});
     });
 
-    // Handle stream errors and cleanup
     fileStream.on('error', (err) => {
       console.error('File stream error:', err);
       fs.unlink(tmpMp3, () => {});
@@ -117,14 +109,9 @@ app.get('/download', async (req, res) => {
 
   } catch (error) {
     console.error('Internal error:', error);
-
-    // Clean up any leftover temp files on failure
     if (tmpM4a) fs.unlink(tmpM4a, () => {});
     if (tmpMp3) fs.unlink(tmpMp3, () => {});
-
-    if (!res.headersSent) {
-      res.status(500).send('Internal Server Error.');
-    }
+    if (!res.headersSent) res.status(500).send('Internal Server Error.');
   }
 });
 
