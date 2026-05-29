@@ -24,6 +24,14 @@ async function initYtdlp() {
     }
   } else {
     console.log('Linux detected. Using system yt-dlp.');
+    // Check deno is available
+    try {
+      const { execSync } = require('child_process');
+      const denoVersion = execSync('deno --version').toString();
+      console.log('Deno found:', denoVersion);
+    } catch (e) {
+      console.error('Deno NOT found! n-challenge will fail.');
+    }
   }
 }
 
