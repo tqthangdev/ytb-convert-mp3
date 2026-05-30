@@ -56,10 +56,11 @@ app.get('/download', async (req, res) => {
   let tmpMp3 = null;
   const socketId = req.query.socketId; // Extract socketId passed from frontend
 
-  // Helper function to emit real-time status updates via Socket.io
+  // Modify the sendStatus utility inside app.get('/download') in index.js
   const sendStatus = (status, percent) => {
     if (socketId && io.to(socketId)) {
-      io.to(socketId).emit('progress_update', { status, percent });
+      // Fix: Include the requested url string context so the client separates multi-threaded states
+      io.to(socketId).emit('progress_update', { status, percent, url: videoUrl });
     }
   };
 
