@@ -157,6 +157,12 @@ app.get('/download', async (req, res) => {
   }
 });
 
+// Fix: Add a root route for environment wake-up pings
+app.get('/', (req, res) => {
+  console.log('Keep-alive ping received from client.');
+  res.status(200).send('Server is alive and awake!');
+});
+
 initYtdlp().then(() => {
   // Use http server wrapper instance instead of original express app listener
   server.listen(PORT, '0.0.0.0', () => {
