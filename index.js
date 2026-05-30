@@ -51,25 +51,35 @@ io.on('connection', (socket) => {
   });
 });
 
+// Replace the internal logic of app.get('/download') inside index.js
 app.get('/download', async (req, res) => {
   let tmpM4a = null;
   let tmpMp3 = null;
-  const socketId = req.query.socketId; // Extract socketId passed from frontend
+  const socketId = req.query.socketId; 
+  let videoUrl = req.query.url; // Use let instead of const to allow mutations
 
-  // Modify the sendStatus utility inside app.get('/download') in index.js
   const sendStatus = (status, percent) => {
     if (socketId && io.to(socketId)) {
-      // Fix: Include the requested url string context so the client separates multi-threaded states
-      io.to(socketId).emit('progress_update', { status, percent, url: videoUrl });
+      io.to(socketId).emit('progress_update', { status, percent, url: req.query.url });
     }
   };
 
   try {
-    const videoUrl = req.query.url;
     if (!videoUrl) return res.status(400).send('Missing URL parameter.');
 
-    console.log(`Download request received for URL: ${videoUrl}`);
-    sendStatus('fetching_info', 5); // Notify client that metadata extraction has started
+    // Fix: Normalize short links (youtu.be) and remove analytic query parameters (?si=...)
+    videoUrl = videoUrl.trim();
+    if (videoUrl.includes('youtu.be/')) {
+      const videoId = videoUrl.split('youtu.be/')[1].split('?')[0];
+      videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    } else if (videoUrl.includes('watch?v=')) {
+      const urlObj = new URL(videoUrl);
+      const videoId = urlObj.searchParams.get('v');
+      videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    }
+
+    console.log(`Processing normalized target URL: ${videoUrl}`);
+    sendStatus('fetching_info', 5); 
 
     req.setTimeout(0);
     res.setTimeout(0);
@@ -80,24 +90,32 @@ app.get('/download', async (req, res) => {
     const ytdlpArgs = [
       '--js-runtimes', 'deno',
       '--remote-components', 'ejs:github',
+      '--no-check-certificates', // Bypass SSL verification drops if any on cloud containers
     ];
 
-    const info = await ytdlpWrap.getVideoInfo([
-      videoUrl,
-      ...ytdlpArgs,
-      ...cookieArgs,
-    ]);
+    // Fetch video info metadata
+    let info;
+    try {
+      info = await ytdlpWrap.getVideoInfo([
+        videoUrl,
+        ...ytdlpArgs,
+        ...cookieArgs,
+      ]);
+    } catch (infoError) {
+      console.error('Failed to extract video metadata info:', infoError.message);
+      // Return detail back to response stream for precise mobile alert messaging
+      return res.status(500).send(`Metadata failure: ${infoError.message}`);
+    }
 
-    const safeTitle = (info.title || 'audio').replace(/[\\/:*?"<>|]/g, '');
+    const safeTitle = (info.title || 'audio').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, '_');
     const timestamp = Date.now();
 
     tmpM4a = path.join('/tmp', `${timestamp}_${safeTitle}.m4a`);
     tmpMp3 = path.join('/tmp', `${timestamp}_${safeTitle}.mp3`);
 
-    console.log(`Downloading audio source: ${safeTitle}`);
-    sendStatus('downloading_server', 20); // Notify client that server download has started
+    console.log(`Downloading audio source payload to: ${tmpM4a}`);
+    sendStatus('downloading_server', 20); 
 
-    // Monitor yt-dlp download progress stream and map it to 20% -> 70% range
     let ytdlpEventEmitter = ytdlpWrap.exec([
       videoUrl,
       '-f', '140',
@@ -109,23 +127,34 @@ app.get('/download', async (req, res) => {
        const currentPercent = 20 + Math.round((progress.percent || 0) * 0.5); 
        sendStatus('downloading_server', currentPercent);
     })
-    .on('error', (err) => { throw err; });
+    .on('error', (err) => { 
+      console.error('Ytdlp download binary stream process error:', err.message);
+    });
 
-    // Wait until the download stream completely closes
     await new Promise((resolve, reject) => {
        ytdlpEventEmitter.on('close', resolve);
        ytdlpEventEmitter.on('error', reject);
     });
 
-    console.log('Download complete. Initiating FFmpeg conversion to MP3...');
-    sendStatus('converting', 75); // Notify client that audio transcoding is in progress
+    if (!fs.existsSync(tmpM4a)) {
+      throw new Error('Source file .m4a was not created by yt-dlp binary');
+    }
 
-    execSync(`ffmpeg -i "${tmpM4a}" -q:a 0 "${tmpMp3}"`);
-    fs.unlinkSync(tmpM4a);
+    console.log('Download complete. Initiating FFmpeg conversion to MP3...');
+    sendStatus('converting', 75); 
+
+    try {
+      execSync(`ffmpeg -y -i "${tmpM4a}" -q:a 0 "${tmpMp3}"`);
+    } catch (ffmpegError) {
+      console.error('FFmpeg transformation compilation failure:', ffmpegError.message);
+      throw ffmpegError;
+    }
+
+    if (fs.existsSync(tmpM4a)) fs.unlinkSync(tmpM4a);
     tmpM4a = null;
 
     console.log('Transcoding complete. Ready to stream file back to client.');
-    sendStatus('streaming', 90); // Notify client that file is ready to be delivered
+    sendStatus('streaming', 90); 
 
     const stat = fs.statSync(tmpMp3);
 
@@ -140,21 +169,21 @@ app.get('/download', async (req, res) => {
     fileStream.on('end', () => {
       console.log('Streaming successfully completed. Cleaning up cache files...');
       sendStatus('completed', 100);
-      fs.unlink(tmpMp3, () => {});
+      if (tmpMp3 && fs.existsSync(tmpMp3)) fs.unlink(tmpMp3, () => {});
     });
 
     fileStream.on('error', (err) => {
-      console.error('File stream error encountered:', err);
-      fs.unlink(tmpMp3, () => {});
-      if (!res.headersSent) res.status(500).send('Stream error.');
+      console.error('File stream error encountered:', err.message);
+      if (tmpMp3 && fs.existsSync(tmpMp3)) fs.unlink(tmpMp3, () => {});
+      if (!res.headersSent) res.status(500).send('Stream transfer error.');
     });
 
   } catch (error) {
-    console.error('Internal server exception occurred:', error);
+    console.error('Internal server exception occurred:', error.message);
     sendStatus('error', 0);
-    if (tmpM4a) fs.unlink(tmpM4a, () => {});
-    if (tmpMp3) fs.unlink(tmpMp3, () => {});
-    if (!res.headersSent) res.status(500).send('Internal Server Error.');
+    if (tmpM4a && fs.existsSync(tmpM4a)) fs.unlink(tmpM4a, () => {});
+    if (tmpMp3 && fs.existsSync(tmpMp3)) fs.unlink(tmpMp3, () => {});
+    if (!res.headersSent) res.status(500).send(`Internal Error: ${error.message}`);
   }
 });
 
